@@ -1,17 +1,21 @@
 pub mod xor {
 
+    /// Basic XOR Encryption/Decryption
     pub struct XOREnc {}
 
     impl XOREnc {
+        /// Encrypts to byte slices with the same length. 
         pub fn fixed_encrypt(bytes1: &[u8], bytes2: &[u8], output: &mut Vec<u8>) {
             assert!(bytes1.len() == bytes2.len());
             output.extend(bytes1.iter().zip(bytes2.iter()).map(|(u, v)| u ^ v));
         }
 
+        /// Encrypts a byte slice with a single byte. 
         pub fn single_key_encrypt(bytes: &[u8], key: u8, output: &mut Vec<u8>) {
             output.extend(bytes.iter().map(|&u| u ^ key))
         }
 
+        /// Encrypts a byte slice with a repeating key. This is also called Vigenere Encryption. 
         pub fn repeating_key_encrypt(bytes: &[u8], key: &[u8], output: &mut Vec<u8>) {
             output.extend(bytes.iter().zip(key.iter().cycle()).map(|(u, v)| u ^ v))
         }
@@ -52,11 +56,30 @@ pub mod cipher {
 
     use super::xor::XOREnc;
 
+    /// Mutates the given buffer to get valid PKCS#7 padding with length len.
     pub fn pkcs7padding(buf: &mut BytesMut, len: usize) {
         let pad = (len - (buf.len() % len)) % len;
         buf.put_bytes(pad as u8, pad);
     }
 
+    /// Checks for valid PKCS#7 padding and strips it. Returns Err if no valid padding is found.
+    pub fn strip_pkcs7_padding<'a>(padded : &'a[u8]) -> Result<&'a[u8], ()> {
+        let len = match u8::try_from(padded.len()) {
+            Ok(a) => a,
+            Err(_) => return Err(())
+        };
+
+        for i in 1..len {
+            let pad = len - i;
+            if padded[(i as usize)..].iter().all(|v| *v == pad ){
+                return Ok(&padded[0..(i as usize)])
+            }
+        }
+    
+        Err(())
+    }
+
+    /// Basic trait for Block Ciphers like AES. 
     pub trait CipherCore {
         const BYTES: usize;
         const BITS: usize;
@@ -66,11 +89,13 @@ pub mod cipher {
         fn decrypt(&self, text: &[u8]) -> Vec<u8>;
     }
 
+    /// Modes for Encryption or Decryption.
     pub enum CipherMode {
         Encrypt,
         Decrypt,
     }
 
+    /// ECB Implementation for a generic Cipher implementation.
     pub struct ECBMode<C: CipherCore> {
         cipher_mode: CipherMode,
         core: C,
@@ -78,6 +103,7 @@ pub mod cipher {
     }
 
     impl<C: CipherCore> ECBMode<C> {
+        /// Initializes with a given key. The length of key must be the same as T::BYTES 
         pub fn init(key: &[u8], cipher_mode: CipherMode) -> Self {
             Self {
                 cipher_mode,
@@ -86,6 +112,7 @@ pub mod cipher {
             }
         }
 
+        /// Updates buffer 
         pub fn update(&mut self, text: &[u8], output: &mut Vec<u8>) {
             self.buf.put(text);
 
@@ -98,6 +125,7 @@ pub mod cipher {
             }
         }
 
+        /// Consumes self and returns the whole encrypted buffer.
         pub fn end(self, output: &mut Vec<u8>) {
             if !self.buf.is_empty() {
                 let mut buf = self.buf;
@@ -119,6 +147,8 @@ pub mod cipher {
     }
 
     impl<C: CipherCore> CBCMode<C> {
+                
+        /// Initializes with a given key and iv. The length of key and iv must be the same as T::BYTES. 
         pub fn init(key: &[u8], iv: &[u8], cipher_mode: CipherMode) -> Self {
             assert_eq!(iv.len(), C::BYTES);
             let mut buf = BytesMut::with_capacity(1024);
@@ -130,6 +160,7 @@ pub mod cipher {
             }
         }
 
+        /// Updates buffer 
         pub fn update(&mut self, text: &[u8], output: &mut Vec<u8>) {
             self.buf.put(text);
 
@@ -139,6 +170,7 @@ pub mod cipher {
             }
         }
 
+        /// Single block encryption. Assumes that there is enough space in the buffer.
         fn single_block(&mut self, output: &mut Vec<u8>) {
             let prev = self.buf.get(0..C::BYTES).unwrap().to_owned();
             let curr = self.buf.get_mut(C::BYTES..2*C::BYTES).unwrap();
@@ -159,6 +191,7 @@ pub mod cipher {
             }
         }
 
+        /// Consumes self and returns the whole encrypted buffer.
         pub fn end(mut self, output: &mut Vec<u8>) {
             if self.buf.len() != C::BYTES {
                 pkcs7padding(&mut self.buf, C::BYTES);
@@ -177,6 +210,13 @@ pub mod cipher {
             Some(b"YELLOW SUBMARINE\x04\x04\x04\x04".as_slice())
         )
     }
+
+    #[test]
+    fn padding_validation() {
+        assert_eq!( strip_pkcs7_padding(b"ICE ICE BABY\x04\x04\x04\x04".as_slice()), Ok(b"ICE ICE BABY".as_slice()) );
+        assert_eq!( strip_pkcs7_padding(b"ICE ICE BABY\x05\x05\x05\x05".as_slice()), Err(()) );
+        assert_eq!( strip_pkcs7_padding(b"ICE ICE BABY\x01\x02\x03\x04".as_slice()), Err(()) );
+    }
 }
 
 pub mod aes {
@@ -187,6 +227,7 @@ pub mod aes {
     pub type AesEcb128 = ECBMode<Aes128>;
     pub type AesCbc128 = CBCMode<Aes128>;
 
+    /// Implementation of CipherCore for AES-128
     pub struct Aes128 {
         key: Vec<u8>,
     }
