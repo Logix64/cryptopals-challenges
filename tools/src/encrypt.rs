@@ -4,18 +4,18 @@ pub mod xor {
     pub struct XOREnc {}
 
     impl XOREnc {
-        /// Encrypts to byte slices with the same length. 
+        /// Encrypts to byte slices with the same length.
         pub fn fixed_encrypt(bytes1: &[u8], bytes2: &[u8], output: &mut Vec<u8>) {
             assert!(bytes1.len() == bytes2.len());
             output.extend(bytes1.iter().zip(bytes2.iter()).map(|(u, v)| u ^ v));
         }
 
-        /// Encrypts a byte slice with a single byte. 
+        /// Encrypts a byte slice with a single byte.
         pub fn single_key_encrypt(bytes: &[u8], key: u8, output: &mut Vec<u8>) {
             output.extend(bytes.iter().map(|&u| u ^ key))
         }
 
-        /// Encrypts a byte slice with a repeating key. This is also called Vigenere Encryption. 
+        /// Encrypts a byte slice with a repeating key. This is also called Vigenere Encryption.
         pub fn repeating_key_encrypt(bytes: &[u8], key: &[u8], output: &mut Vec<u8>) {
             output.extend(bytes.iter().zip(key.iter().cycle()).map(|(u, v)| u ^ v))
         }
@@ -52,6 +52,8 @@ pub mod xor {
 }
 
 pub mod cipher {
+    use std::vec::IntoIter;
+
     use bytes::{Buf, BufMut, BytesMut};
 
     use super::xor::XOREnc;
@@ -63,23 +65,23 @@ pub mod cipher {
     }
 
     /// Checks for valid PKCS#7 padding and strips it. Returns Err if no valid padding is found.
-    pub fn strip_pkcs7_padding<'a>(padded : &'a[u8]) -> Result<&'a[u8], ()> {
+    pub fn strip_pkcs7_padding<'a>(padded: &'a [u8]) -> Result<&'a [u8], ()> {
         let len = match u8::try_from(padded.len()) {
             Ok(a) => a,
-            Err(_) => return Err(())
+            Err(_) => return Err(()),
         };
 
         for i in 1..len {
             let pad = len - i;
-            if padded[(i as usize)..].iter().all(|v| *v == pad ){
-                return Ok(&padded[0..(i as usize)])
+            if padded[(i as usize)..].iter().all(|v| *v == pad) {
+                return Ok(&padded[0..(i as usize)]);
             }
         }
-    
+
         Err(())
     }
 
-    /// Basic trait for Block Ciphers like AES. 
+    /// Basic trait for Block Ciphers like AES.
     pub trait CipherCore {
         const BYTES: usize;
         const BITS: usize;
@@ -103,7 +105,7 @@ pub mod cipher {
     }
 
     impl<C: CipherCore> ECBMode<C> {
-        /// Initializes with a given key. The length of key must be the same as T::BYTES 
+        /// Initializes with a given key. The length of key must be the same as T::BYTES
         pub fn init(key: &[u8], cipher_mode: CipherMode) -> Self {
             Self {
                 cipher_mode,
@@ -112,7 +114,7 @@ pub mod cipher {
             }
         }
 
-        /// Updates buffer 
+        /// Updates buffer
         pub fn update(&mut self, text: &[u8], output: &mut Vec<u8>) {
             self.buf.put(text);
 
@@ -147,8 +149,7 @@ pub mod cipher {
     }
 
     impl<C: CipherCore> CBCMode<C> {
-                
-        /// Initializes with a given key and iv. The length of key and iv must be the same as T::BYTES. 
+        /// Initializes with a given key and iv. The length of key and iv must be the same as T::BYTES.
         pub fn init(key: &[u8], iv: &[u8], cipher_mode: CipherMode) -> Self {
             assert_eq!(iv.len(), C::BYTES);
             let mut buf = BytesMut::with_capacity(1024);
@@ -160,11 +161,11 @@ pub mod cipher {
             }
         }
 
-        /// Updates buffer 
+        /// Updates buffer
         pub fn update(&mut self, text: &[u8], output: &mut Vec<u8>) {
             self.buf.put(text);
 
-            while self.buf.len() >= 2*C::BYTES  {
+            while self.buf.len() >= 2 * C::BYTES {
                 self.single_block(output);
                 self.buf.advance(C::BYTES);
             }
@@ -173,7 +174,7 @@ pub mod cipher {
         /// Single block encryption. Assumes that there is enough space in the buffer.
         fn single_block(&mut self, output: &mut Vec<u8>) {
             let prev = self.buf.get(0..C::BYTES).unwrap().to_owned();
-            let curr = self.buf.get_mut(C::BYTES..2*C::BYTES).unwrap();
+            let curr = self.buf.get_mut(C::BYTES..2 * C::BYTES).unwrap();
 
             let mut xor = Vec::with_capacity(C::BYTES);
             match self.cipher_mode {
@@ -200,6 +201,74 @@ pub mod cipher {
         }
     }
 
+    pub trait KeyStreamFormat {
+        const BLOCKLEN: usize;
+
+        fn get_block(&self, block_ctr: usize) -> Vec<u8>;
+    }
+
+    struct KeyStream<C: CipherCore, F: KeyStreamFormat> {
+        core: C,
+        format: F,
+        block_ctr: usize,
+        iter: IntoIter<u8>,
+    }
+
+    impl<C: CipherCore, F: KeyStreamFormat> KeyStream<C, F> {
+        fn new(core: C, format: F) -> Self {
+            assert_eq!(C::BYTES, F::BLOCKLEN);
+            let block = core.encrypt(&format.get_block(0));
+            Self {
+                core,
+                format,
+                block_ctr: 0,
+                iter: block.into_iter(),
+            }
+        }
+
+        fn reset(&mut self) {
+            self.block_ctr = 0;
+            self.iter = self.format.get_block(0).into_iter();
+        }
+    }
+
+    impl<C: CipherCore, F: KeyStreamFormat> Iterator for KeyStream<C, F> {
+        type Item = u8;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.iter.next().or_else(|| {
+                self.block_ctr = self.block_ctr + 1;
+                let block =  self.format.get_block( self.block_ctr );
+                self.iter = self.core.encrypt(&block).into_iter();
+                self.iter.next()
+            })
+        }
+    }
+
+    pub struct CTRMode<C: CipherCore, F: KeyStreamFormat> {
+        keystream: KeyStream<C, F>,
+    }
+
+    impl<C: CipherCore, F: KeyStreamFormat> CTRMode<C, F> {
+        pub fn init(key: &[u8], format: F) -> Self {
+            Self {
+                keystream: KeyStream::new(C::init(key), format),
+            }
+        }
+
+        pub fn update(&mut self, text: &[u8], output: &mut Vec<u8>) {
+            output.extend(
+                text.iter()
+                    .zip(self.keystream.by_ref().take(text.len()))
+                    .map(|(&u, v)| u ^ v),
+            )
+        }
+
+        pub fn reset(&mut self) {
+            self.keystream.reset();
+        }
+    }
+
     #[test]
     fn test_pkcs7_padding() {
         let mut buf = BytesMut::with_capacity(200);
@@ -213,16 +282,25 @@ pub mod cipher {
 
     #[test]
     fn padding_validation() {
-        assert_eq!( strip_pkcs7_padding(b"ICE ICE BABY\x04\x04\x04\x04".as_slice()), Ok(b"ICE ICE BABY".as_slice()) );
-        assert_eq!( strip_pkcs7_padding(b"ICE ICE BABY\x05\x05\x05\x05".as_slice()), Err(()) );
-        assert_eq!( strip_pkcs7_padding(b"ICE ICE BABY\x01\x02\x03\x04".as_slice()), Err(()) );
+        assert_eq!(
+            strip_pkcs7_padding(b"ICE ICE BABY\x04\x04\x04\x04".as_slice()),
+            Ok(b"ICE ICE BABY".as_slice())
+        );
+        assert_eq!(
+            strip_pkcs7_padding(b"ICE ICE BABY\x05\x05\x05\x05".as_slice()),
+            Err(())
+        );
+        assert_eq!(
+            strip_pkcs7_padding(b"ICE ICE BABY\x01\x02\x03\x04".as_slice()),
+            Err(())
+        );
     }
 }
 
 pub mod aes {
     use openssl::{cipher::Cipher, cipher_ctx::CipherCtx};
 
-    use super::cipher::{CBCMode, CipherCore, ECBMode};
+    use super::cipher::{CBCMode, CTRMode, CipherCore, ECBMode, KeyStreamFormat};
 
     pub type AesEcb128 = ECBMode<Aes128>;
     pub type AesCbc128 = CBCMode<Aes128>;
@@ -276,4 +354,31 @@ pub mod aes {
             output
         }
     }
+
+    /// Implementation of CTR format
+    ///  64 bit unsigned little endian nonce
+    ///  64 bit little endian block count
+    pub struct NonceFormat {
+        nonce: Vec<u8>,
+    }
+
+    impl NonceFormat {
+        pub fn new(nonce: Vec<u8>) -> Self {
+            assert_eq!(nonce.len(), 8);
+            Self { nonce }
+        }
+    }
+
+    impl KeyStreamFormat for NonceFormat {
+        const BLOCKLEN: usize = 16;
+        fn get_block(&self, block_ctr: usize) -> Vec<u8> {
+            [
+                self.nonce.clone(),
+                (block_ctr as u64).to_le_bytes().to_vec(),
+            ]
+            .concat()
+        }
+    }
+
+    pub type AesCtr128 = CTRMode<Aes128, NonceFormat>;
 }

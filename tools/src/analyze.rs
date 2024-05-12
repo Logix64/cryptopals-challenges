@@ -8,7 +8,9 @@ pub mod single_byte {
         /// Mathematical function to call if there is a piece of plaintext to be scored.
         fn score_fn(
             num_chars: &usize,
-            alphanumeric: &usize,
+            alphabetic: &usize,
+            numeric : &usize,
+            punctuation : &usize,
             whitespace: &usize,
             linefeed: &usize,
         ) -> f64;
@@ -18,14 +20,18 @@ pub mod single_byte {
         fn score(plaintext: &Plaintext) -> Option<f64> {
             if let Plaintext::Scored {
                 num_chars,
-                alphanumeric,
+                alphabetic,
+                numeric,
+                punctuation,
                 whitespace,
                 linefeed,
             } = plaintext
             {
                 Some(Self::score_fn(
                     num_chars,
-                    alphanumeric,
+                    alphabetic,
+                    numeric,
+                    punctuation,
                     whitespace,
                     linefeed,
                 ))
@@ -43,7 +49,9 @@ pub mod single_byte {
     pub enum Plaintext {
         Scored {
             num_chars: usize,
-            alphanumeric: usize,
+            alphabetic : usize,
+            numeric : usize,
+            punctuation : usize,
             whitespace: usize,
             linefeed: usize,
         },
@@ -62,13 +70,17 @@ pub mod single_byte {
         ///  - number linebreaks,
         ///  - number of characters as a whole
         fn eval(self, text: &str) -> Self {
-            let alphanumeric = text.chars().filter(|v| v.is_ascii_alphanumeric()).count();
+            let alphabetic = text.chars().filter(|v| v.is_ascii_alphabetic()).count();
+            let numeric = text.chars().filter(|v| v.is_ascii_alphanumeric() && !v.is_alphabetic() ).count();
             let whitespace = text.chars().filter(|v| *v as u8 == b' ').count();
             let linefeed = text.chars().filter(|v| *v as u8 == b'\n').count();
             let num_chars = text.chars().count();
+            let punctuation = text.chars().filter(|v| v.is_ascii_punctuation() ).count();
             Self::Scored {
                 num_chars,
-                alphanumeric,
+                alphabetic,
+                numeric,
+                punctuation,
                 whitespace,
                 linefeed,
             }
@@ -83,18 +95,20 @@ pub mod single_byte {
     impl Display for Plaintext {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             writeln!(f)?;
-            writeln!(f, "|  N  || abc |  _  |  lf |")?;
+            writeln!(f, "|  N  || abc | 123 | &;/ |  _  |  lf |")?;
             match self {
-                Self::Unscored => writeln!(f, "|  ?  ||  ?  |  ?  |")?,
+                Self::Unscored => writeln!(f, "|  ?  ||  ?  |  ?  |  ?  |  ?  |  ?  |")?,
                 Self::Scored {
                     num_chars,
-                    alphanumeric,
+                    alphabetic,
+                    numeric,
+                    punctuation,
                     whitespace,
                     linefeed,
                 } => writeln!(
                     f,
-                    "|{:5}||{:5}|{:5}|{:5}",
-                    num_chars, alphanumeric, whitespace, linefeed
+                    "|{:5}||{:5}|{:5}|{:5}|{:5}|{:5}|",
+                    num_chars, alphabetic, numeric, punctuation, whitespace, linefeed
                 )?,
             }
             writeln!(f)
@@ -148,21 +162,23 @@ pub mod single_byte {
     impl Display for KeyedPlaintext {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             writeln!(f)?;
-            writeln!(f, " key |  N  || abc |  _  |  lf |")?;
+            writeln!(f, " key |  N  || abc | 123 | &;/ |  _  |  lf |")?;
             match self.text {
                 Plaintext::Unscored => {
-                    writeln!(f, "{:5}|  ?  ||  ?  |  ?  |  ?  |", self.key)
+                    writeln!(f, "{:5}|  ?  ||  ?  |  ?  |  ?  |  ?  |  ?  |", self.key)
                 }
                 Plaintext::Scored {
                     num_chars,
-                    alphanumeric,
+                    alphabetic,
+                    numeric,
+                    punctuation,
                     whitespace,
                     linefeed,
                 } => {
                     writeln!(
                         f,
-                        "{:5}|{:5}||{:5}|{:5}|{:5}|",
-                        self.key, num_chars, alphanumeric, whitespace, linefeed
+                        "{:5}|{:5}||{:5}|{:5}|{:5}|{:5}|{:5}|",
+                        self.key, num_chars, alphabetic,numeric,punctuation,whitespace, linefeed
                     )
                 }
             }
@@ -219,29 +235,33 @@ pub mod single_byte {
     impl<T: Display + Eq> Display for TaggedPlaintext<T> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             writeln!(f)?;
-            writeln!(f, " tag | key |  N  || abc |  _  |  lf |")?;
+            writeln!(f, " tag | key |  N  || abc | 123 | &;/ |  _  |  lf |")?;
             match self.plaintext.text {
                 Plaintext::Unscored => {
                     writeln!(
                         f,
-                        "{:5}|{:5}|  ?  ||  ?  |  ?  |  ?  |",
+                        "{:5}|{:5}|  ?  ||  ?  |  ?  |  ?  |  ?  |  ?  |",
                         self.tag,
                         self.get_key()
                     )
                 }
                 Plaintext::Scored {
                     num_chars,
-                    alphanumeric,
+                    alphabetic,
+                    numeric,
+                    punctuation,
                     whitespace,
                     linefeed,
                 } => {
                     writeln!(
                         f,
-                        "{:5}|{:5}|{:5}||{:5}|{:5}|{:5}|",
+                        "{:5}|{:5}|{:5}||{:5}|{:5}|{:5}|{:5}|{:5}|",
                         self.tag,
                         self.get_key(),
                         num_chars,
-                        alphanumeric,
+                        alphabetic,
+                        numeric,
+                        punctuation,
                         whitespace,
                         linefeed
                     )

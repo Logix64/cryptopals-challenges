@@ -4,8 +4,8 @@ use tools::{analyze::single_byte::{KeyedPlaintext, Scorer}, encode::hex::from_he
 struct DefaultScorer{}
 
 impl Scorer for DefaultScorer{
-    fn score_fn( _ : &usize, alphanumeric : &usize, whitespace : &usize, linefeed : &usize ) -> f64 {
-        (alphanumeric + whitespace + linefeed/5) as f64
+    fn score_fn( _ : &usize, alphabetic : &usize,numeric : &usize, punctuation : &usize, whitespace : &usize, linefeed : &usize ) -> f64 {
+        (alphabetic + numeric + whitespace + linefeed/5) as f64
     }
 }
 
