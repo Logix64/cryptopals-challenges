@@ -208,21 +208,25 @@ pub mod cipher {
         fn get_block(&self, block_ctr: usize) -> Vec<u8>;
     }
 
-    /// Trait for Keystreams in Streamciphers
-    pub trait KeyStream : Iterator<Item = u8> {
+    /// Trait for Keystreams in StreamCiphers
+    pub trait KeyStream: Iterator<Item = u8> {
         fn reset(&mut self);
     }
 
-    pub struct RngKeyStream<R : SeedableRng + Rng> {
-        rng : R,
-        seed : R::Seed,
-        iter : IntoIter<u8>
+    pub trait SeekableKeystream: KeyStream {
+        fn seek(&mut self, offset: usize);
     }
-    
 
-    impl<R : SeedableRng + Rng> Iterator for RngKeyStream<R>{
+    /// Implements Keystream for a RNG
+    pub struct RngKeyStream<R: SeedableRng + Rng> {
+        rng: R,
+        seed: R::Seed,
+        iter: IntoIter<u8>,
+    }
+
+    impl<R: SeedableRng + Rng> Iterator for RngKeyStream<R> {
         type Item = u8;
-    
+
         fn next(&mut self) -> Option<Self::Item> {
             self.iter.next().or_else(|| {
                 self.iter = self.rng.next_u32().to_be_bytes().to_vec().into_iter();
@@ -231,8 +235,9 @@ pub mod cipher {
         }
     }
 
-    impl<R : SeedableRng + Rng> KeyStream for  RngKeyStream<R> 
-        where R::Seed : Copy
+    impl<R: SeedableRng + Rng> KeyStream for RngKeyStream<R>
+    where
+        R::Seed: Copy,
     {
         fn reset(&mut self) {
             self.rng = R::from_seed(self.seed);
@@ -240,17 +245,19 @@ pub mod cipher {
         }
     }
 
-    impl<R : SeedableRng + Rng> RngKeyStream<R> 
-        where R::Seed : Copy
+    impl<R: SeedableRng + Rng> RngKeyStream<R>
+    where
+        R::Seed: Copy,
     {
-        pub fn new( seed : R::Seed ) -> Self{
+        pub fn new(seed: R::Seed) -> Self {
             let mut rng = R::from_seed(seed);
             let iter = rng.next_u32().to_be_bytes().to_vec().into_iter();
 
             Self { rng, seed, iter }
         }
     }
-    
+
+    /// Implements Keystream with a given KeystreamFormat for a BlockCipher
     pub struct CipherKeyStream<C: CipherCore, F: KeyStreamFormat> {
         core: C,
         format: F,
@@ -258,15 +265,15 @@ pub mod cipher {
         iter: IntoIter<u8>,
     }
 
-    impl<C :CipherCore, F : KeyStreamFormat> KeyStream for CipherKeyStream<C, F> {
+    impl<C: CipherCore, F: KeyStreamFormat> KeyStream for CipherKeyStream<C, F> {
         fn reset(&mut self) {
             self.block_ctr = 0;
-            self.iter = self.format.get_block(0).into_iter();
+            self.iter = self.core.encrypt(&self.format.get_block(0)).into_iter();
         }
     }
 
     impl<C: CipherCore, F: KeyStreamFormat> CipherKeyStream<C, F> {
-        pub fn new(key : &[u8], format: F) -> Self {
+        pub fn new(key: &[u8], format: F) -> Self {
             assert_eq!(C::BYTES, F::BLOCKLEN);
             let core = C::init(key);
             let block = core.encrypt(&format.get_block(0));
@@ -279,28 +286,38 @@ pub mod cipher {
         }
     }
 
+    impl<C: CipherCore, F: KeyStreamFormat> SeekableKeystream for CipherKeyStream<C, F> {
+        fn seek(&mut self, offset: usize) {
+            self.reset();
+            self.block_ctr = offset / C::BYTES;
+            self.iter =  self.core.encrypt(&self.format.get_block(self.block_ctr) )
+                [(offset % C::BYTES)..]
+                .to_vec()
+                .into_iter();
+        }
+    }
+
     impl<C: CipherCore, F: KeyStreamFormat> Iterator for CipherKeyStream<C, F> {
         type Item = u8;
 
         fn next(&mut self) -> Option<Self::Item> {
             self.iter.next().or_else(|| {
                 self.block_ctr = self.block_ctr + 1;
-                let block =  self.format.get_block( self.block_ctr );
+                let block = self.format.get_block(self.block_ctr);
                 self.iter = self.core.encrypt(&block).into_iter();
                 self.iter.next()
             })
         }
     }
 
-    pub struct CTRMode<K : KeyStream> {
-        keystream: K
+    /// A StreamCipher which encrypts and decrypts a given plaintext with a given KeyStream
+    pub struct StreamCipher<K: KeyStream> {
+        keystream: K,
     }
 
-    impl<K : KeyStream> CTRMode<K> {
-        pub fn init(keystream : K) -> Self {
-            Self {
-                keystream
-            }
+    impl<K: KeyStream> StreamCipher<K> {
+        pub fn init(keystream: K) -> Self {
+            Self { keystream }
         }
 
         pub fn update(&mut self, text: &[u8], output: &mut Vec<u8>) {
@@ -313,6 +330,36 @@ pub mod cipher {
 
         pub fn reset(&mut self) {
             self.keystream.reset();
+        }
+    }
+
+    impl<S: SeekableKeystream> StreamCipher<S> {
+        pub fn edit(&mut self, ciphertext: &mut Vec<u8>, offset: usize, new_text: &[u8]) {
+            assert!(offset <= ciphertext.len());
+            self.keystream.seek(offset);
+
+            let split = (ciphertext.len() - offset).min(new_text.len());
+
+            let encrypted = self
+                .keystream
+                .by_ref()
+                .zip(new_text[0..split].iter())
+                .map(|(v, u)| u ^ v );
+
+            // write into ciphertext for all which <= ciphertext.len()
+            ciphertext
+                .iter_mut()
+                .skip(offset)
+                .zip(encrypted)
+                .for_each(|(c1, c2)| *c1 = c2);
+
+            // extend ciphertext if > ciphertext.len()
+            ciphertext.extend(
+                self.keystream
+                    .by_ref()
+                    .zip(new_text[split..].iter())
+                    .map(|(v, u)| u ^ v ),
+            );
         }
     }
 
@@ -342,12 +389,33 @@ pub mod cipher {
             Err(())
         );
     }
+
+    #[test]
+    fn test_edit() {
+        use rand::random;
+        use super::aes::AesCtr128;
+        use crate::encrypt::aes::NonceFormat;
+        
+        let nonce: [u8;8] = random();
+        let mut ctr = AesCtr128::init(CipherKeyStream::new(b"YELLOW SUBMARINE", NonceFormat::new(nonce.to_vec())));
+        let mut encrypted = Vec::with_capacity(200);
+        let mut decrypted = Vec::with_capacity(200);
+
+        ctr.update(b"THIS IS A TEST", &mut encrypted);
+        ctr.edit(&mut encrypted, 8, b"NOT A TEST");
+        ctr.reset();
+
+        ctr.update(&encrypted, &mut decrypted);
+        assert_eq!(decrypted,b"THIS IS NOT A TEST" );
+    }
 }
 
 pub mod aes {
     use openssl::{cipher::Cipher, cipher_ctx::CipherCtx};
 
-    use super::cipher::{CBCMode, CTRMode, CipherCore, CipherKeyStream, ECBMode, KeyStreamFormat};
+    use super::cipher::{
+        CBCMode, CipherCore, CipherKeyStream, ECBMode, KeyStreamFormat, StreamCipher,
+    };
 
     pub type AesEcb128 = ECBMode<Aes128>;
     pub type AesCbc128 = CBCMode<Aes128>;
@@ -402,7 +470,7 @@ pub mod aes {
         }
     }
 
-    /// Implementation of CTR format
+    /// Implementation of CTR format for 128bit BlockCiphers
     ///  64 bit unsigned little endian nonce
     ///  64 bit little endian block count
     pub struct NonceFormat {
@@ -427,5 +495,5 @@ pub mod aes {
         }
     }
 
-    pub type AesCtr128 = CTRMode<CipherKeyStream<Aes128, NonceFormat>>;
+    pub type AesCtr128 = StreamCipher<CipherKeyStream<Aes128, NonceFormat>>;
 }

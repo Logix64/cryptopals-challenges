@@ -1,7 +1,7 @@
 pub mod mt19937 {
     use rand::{RngCore, SeedableRng};
 
-    use crate::encrypt::cipher::{CTRMode, RngKeyStream};
+    use crate::encrypt::cipher::{StreamCipher, RngKeyStream};
 
     const W: u32 = 32;
     const N: usize = 624;
@@ -133,7 +133,7 @@ pub mod mt19937 {
         }
     }
 
-    pub type MersenneTwisterCipher = CTRMode<RngKeyStream<MersenneTwister>>;
+    pub type MersenneTwisterCipher = StreamCipher<RngKeyStream<MersenneTwister>>;
 
     /// Unwinds the tempering function in extract() in the MersenneTwister. By repeating calls to unwind for a stream of MersenneTwister numbers you can clone the MersenneTwister PRNG.
     pub fn unwind(u: u32) -> u32 {
