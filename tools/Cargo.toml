@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 bytes = "1.6.0"
+md4 = "0.10.2"
 openssl = "0.10.64"
 rand = "0.8.5"
 rand_core = "0.6.4"

@@ -1,0 +1,3 @@
+struct Md4Core{
+    
+}
