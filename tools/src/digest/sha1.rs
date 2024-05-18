@@ -105,13 +105,13 @@ fn test_sha1() {
 
     // test vectors again from wikipedia : https://en.wikipedia.org/wiki/SHA-1
     let mut hasher = Sha1::new();
-    hasher.update(b"The quick brown fox jumps over the lazy dog");
+    hasher.update(&b"The quick brown fox jumps over the lazy dog"[..]);
     let state = hasher.finalize();
 
     assert_eq!(to_hex(&state), "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
 
     let mut hasher = Sha1::new();
-    hasher.update(b"The quick brown fox jumps over the lazy cog");
+    hasher.update(&b"The quick brown fox jumps over the lazy cog"[..]);
     let state = hasher.finalize();
 
     assert_eq!(to_hex(&state), "de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3")

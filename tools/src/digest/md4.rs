@@ -135,13 +135,13 @@ fn  test_md4() {
 
     // test vectors again from wikipedia : https://en.wikipedia.org/wiki/MD4
     let mut hasher = Md4::new();
-    hasher.update(b"The quick brown fox jumps over the lazy dog");
+    hasher.update(&b"The quick brown fox jumps over the lazy dog"[..]);
     let state = hasher.finalize();
 
     assert_eq!(to_hex(&state), "1bee69a46ba811185c194762abaeae90");
     
     let mut hasher = Md4::new();
-    hasher.update(b"The quick brown fox jumps over the lazy cog");
+    hasher.update(&b"The quick brown fox jumps over the lazy cog"[..]);
     let state = hasher.finalize();
 
     assert_eq!(to_hex(&state), "b86e130ce7028da59e672d56ad0113df")

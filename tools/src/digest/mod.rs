@@ -1,5 +1,7 @@
 use bytes::{Buf, BufMut, BytesMut};
 
+use crate::encrypt::xor::XOREnc;
+
 pub mod md4;
 pub mod sha1;
 
@@ -35,8 +37,8 @@ impl<H : HashAlgorithm> Hasher<H>
         Self { core: H::default(), buf: BytesMut::with_capacity(2*H::BUFFERLEN) }
     }
 
-    pub fn update(&mut self, bytes : &[u8] ) {
-        self.buf.put(bytes);
+    pub fn update(&mut self, bytes : impl AsRef<[u8]> ) {
+        self.buf.put(bytes.as_ref());
 
         while let Some(block) = self.buf.get(0..H::BUFFERLEN) {
             self.core.compress(block);
@@ -100,6 +102,55 @@ impl<H : FromState> LengthExtender<H>
     }
 }
 
+/// HMAC implementation of a generic HashAlgorithm
+pub struct Hmac<H : HashAlgorithm> {
+    inner : Hasher<H>,
+    outer : Hasher<H>
+}
+
+impl<H : HashAlgorithm> Hmac<H>
+    where H::OUTPUT : Sized + Clone + Copy + AsRef<[u8]>,
+{
+    pub fn new( key : &[u8] ) -> Self {
+        let hk = {             
+            let mut hasher = Hasher::<H>::new();
+            hasher.update(key);
+            hasher.finalize()
+        };
+
+        let k = if key.len() >= H::BUFFERLEN {
+            hk.as_ref()
+        } else {
+            key
+        };
+
+        let mut outer = Hasher::<H>::new();
+        let mut output = Vec::with_capacity(k.chunk().len() );
+
+        XOREnc::single_key_encrypt(k, 0x5c, &mut output);
+        XOREnc::single_key_encrypt(&vec![0x00; H::BUFFERLEN - k.len()], 0x5c, &mut output);
+        outer.update(&output[..]);
+        output.clear();
+
+        let mut inner = Hasher::<H>::new();
+        XOREnc::single_key_encrypt(k.chunk(), 0x36, &mut output);
+        XOREnc::single_key_encrypt(&vec![0x00; H::BUFFERLEN - k.len()], 0x36, &mut output);
+        inner.update(&output[..]);
+        output.clear();
+        Self{ inner, outer }
+    }
+
+    pub fn update(&mut self, bytes : &[u8] ){
+        self.inner.update(bytes);
+    }
+
+    pub fn finalize(mut self) -> H::OUTPUT {
+        let h_inner = self.inner.finalize();
+        self.outer.update(h_inner);
+        self.outer.finalize()
+    }
+}
+
 /// Calculates the MAC of a given (secret) key and message : MAC(key, message) = H( key || message )
 pub fn mac<H : HashAlgorithm>( key : &[u8], message : &[u8] ) -> H::OUTPUT 
     where H::OUTPUT : Clone + Copy
@@ -108,4 +159,16 @@ pub fn mac<H : HashAlgorithm>( key : &[u8], message : &[u8] ) -> H::OUTPUT
     hasher.update(key);
     hasher.update(message);
     hasher.finalize()
+}
+
+#[test]
+fn test_hmac_sha1() {
+    // test vector for sha-1 from https://datatracker.ietf.org/doc/html/rfc2202 
+    use sha1::Sha1Core;
+    use crate::encode::hex::to_hex;
+
+    let mut hmac = Hmac::<Sha1Core>::new(b"Jefe");
+    hmac.update(b"what do ya want for nothing?");
+
+    assert_eq!(to_hex(&hmac.finalize()),"effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
 }
