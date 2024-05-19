@@ -8,3 +8,5 @@ pub mod analyze;
 pub mod random;
 
 pub mod digest;
+
+pub mod bigint;
