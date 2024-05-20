@@ -20,6 +20,16 @@ impl<const LIMBS: usize> DiffieHellmannParams<LIMBS> {
         let g_mod = DynResidue::new(&g, param);
         Self { p: param, g: g_mod }
     }
+
+    /// Returns the modulus p of given Parameters
+    pub fn get_modulus(&self) -> Uint<LIMBS>{
+        self.p.modulus().to_owned()
+    }
+
+    /// Returns the generator of the Diffie-Hellmann group
+    pub fn get_generator(&self) -> Uint<LIMBS>{
+        self.g.retrieve()
+    }
 }
 
 /// Generic Trait for constant Diffie-Hellmann Parameters
