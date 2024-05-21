@@ -114,7 +114,7 @@ async fn main() -> Result<(), Error> {
         
         // If we receive a response, derive a key. 
         if let Ok(Message::AuthResponse { public_key }) = r1.await {
-            let secret = instance.generate(&public_key, PARAMS);
+            let secret = instance.generate(&public_key);
 
             let key = derive_key(secret);
 

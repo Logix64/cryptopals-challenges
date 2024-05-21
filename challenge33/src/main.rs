@@ -23,7 +23,7 @@ fn main() {
     let p1 = instance1.get_public_key();
     let p2 = instance2.get_public_key();
 
-    assert_eq!(instance1.generate(&p2, PARAMS), instance2.generate(&p1, PARAMS));
+    assert_eq!(instance1.generate(&p2), instance2.generate(&p1));
 
     let instance1 = ConstDiffieHellmanInstance::<NISTParams, LIMBS>::new(&mut rng);
     let instance2 = ConstDiffieHellmanInstance::<NISTParams, LIMBS>::new(&mut rng );

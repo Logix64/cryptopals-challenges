@@ -71,7 +71,7 @@ impl EchoServer {
                     let response = Message::AuthResponse {
                         public_key: instance.get_public_key(),
                     };
-                    self.key = Some(derive_key(instance.generate(&public_key, params)));
+                    self.key = Some(derive_key(instance.generate(&public_key)));
                     Ok(response)
                 } else {
                     Ok(Message::Error {
