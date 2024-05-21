@@ -8,6 +8,7 @@ use crypto_bigint::{
 use rand_core::CryptoRngCore;
 
 /// Dynamic Parameters for Diffie-Hellmann Key Exchange
+#[derive(Clone)]
 pub struct DiffieHellmannParams<const LIMBS: usize> {
     p: DynResidueParams<LIMBS>,
     g: DynResidue<LIMBS>,
@@ -106,8 +107,8 @@ impl<const LIMBS: usize> DynDiffieHellmannInstance<LIMBS> {
 
     /// From a received public key generates secret key material in form of a new Uint object
     /// Consumes the instance.
-    pub fn generate(self, other: &Uint<LIMBS>, params: DiffieHellmannParams<LIMBS>) -> Uint<LIMBS> {
-        DynResidue::new(other, params.p)
+    pub fn generate(self, other: &Uint<LIMBS>) -> Uint<LIMBS> {
+        DynResidue::new(other, *self.public_key.params())
             .pow(&self.private_key.retrieve())
             .retrieve()
     }
