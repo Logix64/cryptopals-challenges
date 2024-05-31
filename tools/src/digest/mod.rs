@@ -19,7 +19,9 @@ pub trait FromState : HashAlgorithm {
 ///  - compress for a BUFFERLEN bytes
 ///  - padding for less than BUFFERLEN bytes
 ///  - finalize for translating internal state to Hash
-pub trait HashAlgorithm : Default {
+pub trait HashAlgorithm : Default 
+    where Self::OUTPUT : Sized + Clone + Copy + AsRef<[u8]>
+{
     const BUFFERLEN : usize;
     type STATE;
     type OUTPUT;
@@ -30,9 +32,7 @@ pub trait HashAlgorithm : Default {
 }
 
 /// Implements a basic Hasher for a given HashAlgorithm
-impl<H : HashAlgorithm> Hasher<H> 
-    where H::OUTPUT : Sized + Clone + Copy,
-{
+impl<H : HashAlgorithm> Hasher<H> {
     pub fn new() -> Self {
         Self { core: H::default(), buf: BytesMut::with_capacity(2*H::BUFFERLEN) }
     }
@@ -70,7 +70,6 @@ pub struct LengthExtender<H : FromState> {
 }
 
 impl<H : FromState> LengthExtender<H> 
-    where H::OUTPUT : Sized + Clone + Copy
 {
     pub fn new( keylen : usize, msg : &[u8], hash : H::OUTPUT ) -> Self
         where H::OUTPUT : Clone + Copy
@@ -109,7 +108,6 @@ pub struct Hmac<H : HashAlgorithm> {
 }
 
 impl<H : HashAlgorithm> Hmac<H>
-    where H::OUTPUT : Sized + Clone + Copy + AsRef<[u8]>,
 {
     pub fn new( key : &[u8] ) -> Self {
         let hk = {             
@@ -153,7 +151,6 @@ impl<H : HashAlgorithm> Hmac<H>
 
 /// Calculates the MAC of a given (secret) key and message : MAC(key, message) = H( key || message )
 pub fn mac<H : HashAlgorithm>( key : &[u8], message : &[u8] ) -> H::OUTPUT 
-    where H::OUTPUT : Clone + Copy
 {
     let mut hasher = Hasher::<H>::new();
     hasher.update(key);
