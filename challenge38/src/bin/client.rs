@@ -1,83 +1,15 @@
+use std::io;
+
 use bytes::BytesMut;
-use crate::{
-    buffering::{Connection, Error}, crypto::{
-        derive_key, derive_u, generate_password, hash_to_uint,
-        SRPParam, SRPParameters,
-    }, keyexchange:: KeyExchange, negotiation::{Negotiation, NegotiationError}, verification::Verification, ValidationError
-};
-use crypto_bigint::{
-    modular::constant_mod::Residue, rand_core::CryptoRngCore, Encoding, NonZero,RandomMod,
-    Uint, U1536,
-};
-use rand::{random, thread_rng};
+use challenge36::{buffering::{Connection, Error}, client::{Authenticator, LIMBS, PARAMS}, crypto::{DifferentParams, NistParams, SRPParam, SRPParameters}, negotiation::{Negotiation, NegotiationError}, verification::{Verification, VerificationError}};
+use challenge38::{keyexchange::KeyExchange, ValidationError};
+use crypto_bigint::{Encoding, Uint};
+use rand::thread_rng;
 use tokio::net::TcpStream;
-use tools::digest::{HashAlgorithm, Hmac};
 
-pub const LIMBS: usize = U1536::LIMBS;
-
-pub const PARAMS: [SRPParam; 2] = [
-    SRPParam::NistParams,
-    SRPParam::DifferentParams,
-];
-
-/// SRP Client network implementation 
 pub struct Client {
     connection: Connection<TcpStream>,
     validated: bool,
-}
-
-/// SRP Authenticator only constructed with SRP Parameters
-/// Essentially a Diffie-Hellmann Instance 
-pub struct Authenticator<const LIMBS: usize> {
-    public_key: Uint<LIMBS>,
-    private_key: Uint<LIMBS> ,
-}
-
-impl<const LIMBS: usize> Authenticator<LIMBS> {
-    
-    /// Generates a new instance for given SRPParameters
-    pub fn new<PARAMS : SRPParameters<LIMBS>>(rng: &mut impl CryptoRngCore) -> Self {
-        let private_key = Uint::<LIMBS>::random_mod(rng, &NonZero::from_uint(PARAMS::MODULUS));
-        let client_public_key = PARAMS::G.pow(&private_key);
-
-        Self {
-            public_key: client_public_key.retrieve(),
-            private_key,
-        }
-    }
-
-    /// Returns the public key A = g**a mod n
-    pub fn get_public_key(&self) -> Uint<LIMBS> {
-        self.public_key
-    }
-
-    /// Derives the key of a given password and returns random salt. 
-    pub fn get_key<PARAMS : SRPParameters<LIMBS>>(
-        &self,
-        password: String,
-        server_public_key: Uint<LIMBS>,
-        u : Uint<LIMBS>,
-        salt: impl AsRef<[u8]>,
-    ) -> (u64, <PARAMS::Hashing as HashAlgorithm>::OUTPUT)
-    where
-        Uint<LIMBS>: Encoding
-    {
-        let x = hash_to_uint::<LIMBS>(generate_password::<PARAMS::Hashing>(password, salt));
-
-        let inner = Residue::<PARAMS, LIMBS>::new(&server_public_key);
-        let outer = inner.pow(&self.private_key) * inner.pow(&u).pow(&x);
-
-        (random(), derive_key::<LIMBS, PARAMS>(&outer.retrieve()))
-    }
-
-    /// Generates HMAC from a byteslice with salt
-    pub fn hmac<L : HashAlgorithm>(&self, salt : impl AsRef<[u8]>, key : L::OUTPUT ) -> L::OUTPUT
-        where L::OUTPUT: Copy + Clone + AsRef<[u8]>,
-    {
-        let mut hmac = Hmac::<L>::new(key.as_ref());
-        hmac.update(salt.as_ref());
-        hmac.finalize()
-    }
 }
 
 impl Client {
@@ -126,9 +58,9 @@ impl Client {
     ) -> Result<Self, ValidationError>
         where Uint<LIMBS> : Encoding
     {
-        if let KeyExchange::GetPublicKey { salt, public_key } = self.connection.get_frame().await?{            
+        if let KeyExchange::GetPublicKey { salt, public_key, u : u_bytes } = self.connection.get_frame().await?{            
             let server_public_key = Uint::<LIMBS>::from_be_slice(&public_key);
-            let u = derive_u::<LIMBS,PARAMS>(&server_public_key, &authenticator.get_public_key());
+            let u = Uint::<LIMBS>::from_be_slice(&u_bytes);
 
             let (hmac_salt, key) = authenticator.get_key::<PARAMS>(password, server_public_key, u, salt);
 
@@ -158,4 +90,63 @@ impl Client {
     pub fn is_validated(&self) -> bool {
         self.validated
     }
+}
+
+
+async fn run(mut client: Client) -> Result<(), ValidationError> {
+    while !client.is_validated() {
+        let mut email = String::new();
+        println!("please enter string");
+        io::stdin()
+            .read_line(&mut email)
+            .map_err(|v| Error::<VerificationError>::from(v))?;
+
+        let params = client.negotiate_params().await?;
+        let mut authenticator = match params {
+            SRPParam::DifferentParams => {
+                client
+                    .generate::<DifferentParams, LIMBS>(email.trim().into())
+                    .await?
+            }
+            SRPParam::NistParams => {
+                client
+                    .generate::<NistParams, LIMBS>(email.trim().into())
+                    .await?
+            }
+        };
+
+        let mut password = String::new();
+        println!("please enter password");
+        io::stdin()
+            .read_line(&mut password)
+            .map_err(|v| Error::<VerificationError>::from(v))?;
+        client = match params {
+            SRPParam::DifferentParams => {
+                client
+                    .authenticate::<DifferentParams, LIMBS>(
+                        password.trim().into(),
+                        &mut authenticator,
+                    )
+                    .await?
+            }
+            SRPParam::NistParams => {
+                client
+                    .authenticate::<NistParams, LIMBS>(password.trim().into(), &mut authenticator)
+                    .await?
+            }
+        };
+    }
+    println!("authentication was successful !!!");
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), ValidationError> {
+    if let Ok(con) = TcpStream::connect("127.0.0.2:6380").await {
+        // generate new Client instance
+        let client = Client::new(con);
+        tokio::spawn(run(client)).await.unwrap()?;
+    }
+    Ok(())
 }

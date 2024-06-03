@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bytes::BytesMut;
+use challenge36::{buffering::{Connection, Error}, crypto::{derive_key, derive_v, hash_to_uint, SRPParam, SRPParameters}, negotiation::{Negotiation, NegotiationError}, verification::Verification};
 use crypto_bigint::{modular::constant_mod::Residue, rand_core::CryptoRngCore, Encoding, NonZero, RandomMod, Uint, U1536};
 use rand::{random, thread_rng};
 use tokio::{net::TcpStream, sync::Mutex};
 use tools::digest::{HashAlgorithm, Hmac};
 
-use crate::{buffering::{Connection, Error}, crypto::{derive_key, derive_u, derive_v, SRPParam, SRPParameters}, keyexchange::KeyExchange, negotiation::{Negotiation, NegotiationError}, verification::Verification, ValidationError};
+use crate::{keyexchange::KeyExchange, ValidationError};
 
 pub const LIMBS: usize = U1536::LIMBS;
 
@@ -32,6 +33,7 @@ fn const_compare(u: impl AsRef<[u8]>, v: impl AsRef<[u8]>) -> bool {
 /// allows blinding, e.g. if no user is found still performs operations to prevent any bruteforce attacks
 pub struct Verificator<const LIMBS: usize, T: SRPParameters<LIMBS>> {
     public_key: Uint<LIMBS>,
+    u : Uint<LIMBS>,
     blind: bool,
     key: <T::Hashing as HashAlgorithm>::OUTPUT,
 }
@@ -41,15 +43,17 @@ where
     Uint<LIMBS>: Encoding,
 {
     /// Generates new Verificator, depending on SRPParameters, allows const evaluation
-    fn new(
+    pub fn new(
         rng: &mut impl CryptoRngCore,
         v: Residue<H, LIMBS>,
         client_public_key: &Uint<LIMBS>,
         blind: bool,
     ) -> Self {
         let private_key = Uint::<LIMBS>::random_mod(rng, &NonZero::from_uint(H::MODULUS));
-        let server_public_key = H::G.pow(&private_key) + H::FACTOR * v;
-        let u = derive_u::<LIMBS,H>(&server_public_key.retrieve(), client_public_key);
+        let server_public_key = H::G.pow(&private_key);
+
+        let random : [u8;16] = random(); 
+        let u = hash_to_uint( random );
 
         let key = derive_key::<LIMBS, H>(
             &(Residue::new(client_public_key) * v.pow(&u))
@@ -59,6 +63,7 @@ where
 
         Self {
             public_key: server_public_key.retrieve(),
+            u,
             blind,
             key,
         }
@@ -67,6 +72,10 @@ where
     /// Returns the public key B = kv + g**b mod n of the verificator. 
     fn get_public_key(&self) -> Uint<LIMBS> {
         self.public_key
+    }
+
+    fn get_u(&self) -> Uint<LIMBS>{
+        self.u
     }
 
     /// Validates if hmac with salt is true
@@ -116,6 +125,8 @@ impl Server {
         Uint<LIMBS>: Encoding,
     {
         if let KeyExchange::GetUsername { email, public_key } = self.connection.get_frame().await? {
+            println!("received username");
+
             let (blind, (hash, hash_salt)) = (
                 db.contains_key(&email),
                 db.get(&email).copied().unwrap_or((random(), random())),
@@ -129,9 +140,11 @@ impl Server {
             let public_key =
                 BytesMut::from(verificator.get_public_key().to_be_bytes().as_ref()).freeze();
             let salt = BytesMut::from(hash_salt.to_be_bytes().as_ref()).freeze();
+            let u = BytesMut::from(verificator.get_u().to_be_bytes().as_ref()).freeze();
 
+            println!("returned own public key");
             self.connection
-                .write_frame(&KeyExchange::GetPublicKey { salt, public_key })
+                .write_frame(&KeyExchange::GetPublicKey { salt, public_key, u })
                 .await?;
 
             return Ok(verificator);
@@ -145,10 +158,11 @@ impl Server {
         mut self,
         db: &Db,
     ) -> Result<Self, ValidationError> {
+
+        println!("successfully negotiated");
         let locked = db.lock().await;
         let verify_result = self.verify::<PARAM, LIMBS>(&locked).await;
 
-        
         if verify_result.is_err() {
             match verify_result {
                 Err(ValidationError::Protocol) => {

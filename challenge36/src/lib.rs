@@ -162,9 +162,8 @@ pub mod buffering {
             }
         }
 
-
-
     } 
+
 
 }
 
@@ -301,7 +300,6 @@ pub mod crypto{
     }
 
 }
-
 
 /// Catchall Error for any part of the Protocol
 #[derive(Debug)]
