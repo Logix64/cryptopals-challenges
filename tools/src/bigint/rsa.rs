@@ -122,7 +122,7 @@ impl RSA {
                 let bytes_len = bytes.as_ref().len();
                 let mut v: Vec<u8>  = vec![0; Uint::<LIMBS>::BYTES];
                 v[0..bytes_len].copy_from_slice(bytes.as_ref());
-                Uint::<LIMBS>::from_be_slice(&v)
+                Uint::<LIMBS>::from_le_slice(&v)
             }
         )
     }
