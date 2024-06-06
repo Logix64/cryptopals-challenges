@@ -19,6 +19,7 @@ impl Default for Sha1Core {
 }
 
 impl HashAlgorithm for Sha1Core {
+    const DIGEST_SIZE : usize = 20;
     const BUFFERLEN: usize = 64;
     type STATE = [u32; 5];
     type OUTPUT = [u8; 20];

@@ -1,0 +1,9 @@
+[package]
+name = "challenge42"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = "1.6.0"
+crypto-bigint = "0.5.5"
+tools = {path = "../tools" }

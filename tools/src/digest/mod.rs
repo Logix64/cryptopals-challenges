@@ -22,6 +22,7 @@ pub trait FromState : HashAlgorithm {
 pub trait HashAlgorithm : Default 
     where Self::OUTPUT : Sized + Clone + Copy + AsRef<[u8]>
 {
+    const DIGEST_SIZE : usize;
     const BUFFERLEN : usize;
     type STATE;
     type OUTPUT;
@@ -156,6 +157,19 @@ pub fn mac<H : HashAlgorithm>( key : &[u8], message : &[u8] ) -> H::OUTPUT
     hasher.update(key);
     hasher.update(message);
     hasher.finalize()
+}
+
+#[macro_export]
+macro_rules! hash {
+    ($algo:ty,$($x:expr),*) => {
+        {
+            let mut temp = <$algo>::new();
+            $(
+                temp.update($x);
+            )*
+            temp.finalize()
+        }
+    };
 }
 
 #[test]

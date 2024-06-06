@@ -16,6 +16,7 @@ impl Default for Md4Core {
 }
 
 impl HashAlgorithm for Md4Core {
+    const DIGEST_SIZE : usize = 16;
     const BUFFERLEN : usize = 64;
     type STATE = [u32;4];
     type OUTPUT = [u8;16];
