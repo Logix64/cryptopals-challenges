@@ -1,6 +1,6 @@
 pub mod hex {
-    /// Converts a single pair of chars into a byte. 
-    /// If there are unnatural hex chars given, returns None. 
+    /// Converts a single pair of chars into a byte.
+    /// If there are unnatural hex chars given, returns None.
     fn single_u8_be(chars: [char; 2]) -> Option<u8> {
         assert!(
             chars.iter().all(|v| v.is_ascii_hexdigit()),
@@ -37,7 +37,7 @@ pub mod hex {
         state
     }
 
-    /// Converts bytes to a hex string. 
+    /// Converts bytes to a hex string.
     pub fn to_hex(bytes: &[u8]) -> String {
         let mut hex = String::new();
         for i in bytes {
@@ -65,7 +65,7 @@ pub mod base64 {
 
     pub const RANGE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    /// Wrapping struct for Sextets aka numbers with at most 6 bits. 
+    /// Wrapping struct for Sextets aka numbers with at most 6 bits.
     #[derive(Clone, Copy)]
     enum Sextet {
         Sextet(u8),
@@ -81,7 +81,7 @@ pub mod base64 {
             }
         }
 
-        /// Converts from a given Base64 character to itself. 
+        /// Converts from a given Base64 character to itself.
         /// If the character is not included in the Base64 charset, returns None.
         fn from_char(s: char) -> Option<Self> {
             match s as u8 {
@@ -94,7 +94,7 @@ pub mod base64 {
             }
         }
 
-        /// Consumes self and returns the whole byte. 
+        /// Consumes self and returns the whole byte.
         fn into_inner(self) -> u8 {
             let Self::Sextet(byte) = self;
             byte
@@ -114,7 +114,7 @@ pub mod base64 {
         }
     }
 
-    /// Converts 4 Sextets into 3 Octets. 
+    /// Converts 4 Sextets into 3 Octets.
     fn single_sextet(sextets: [Sextet; 4]) -> [u8; 3] {
         let u1 = sextets[0].into_inner();
         let u2 = sextets[1].into_inner();
@@ -138,7 +138,7 @@ pub mod base64 {
         ]
     }
 
-    /// Encodes a given byte-slice into base64 with an option to add padding with = 
+    /// Encodes a given byte-slice into base64 with an option to add padding with =
     pub fn to_base64(bytes: &[u8], pad: bool) -> String {
         let mut string = String::new();
         for chunk in bytes.chunks(3) {
@@ -171,7 +171,7 @@ pub mod base64 {
         string
     }
 
-    /// Converts from Base64 Encoding to Byte Vector and removes padding 
+    /// Converts from Base64 Encoding to Byte Vector and removes padding
     pub fn from_base64(base64: &str) -> Vec<u8> {
         assert!(base64.is_ascii());
 
@@ -289,31 +289,39 @@ pub mod uri {
         text.matches('=').count() == 1
     }
 
-    /// Performs the splitting into the left and right side of the equation. 
-    /// Does not check for any validation - the check must be performed before. 
+    /// Performs the splitting into the left and right side of the equation.
+    /// Does not check for any validation - the check must be performed before.
     fn parse_single_var<'a>(text: &'a str) -> (&'a str, &'a str) {
         text.split_once('=').unwrap()
     }
 
     /// Encodes a mapping into a valid URI parameter list. Goes from the beginning to the end, unlike in HashMaps.   
-    pub fn to_uri<'a>( map : &Vec<(&'a str, &'a str)> ) -> String {
+    pub fn to_uri<'a>(map: &Vec<(&'a str, &'a str)>) -> String {
         let mut res = String::new();
         if map.len() > 0 {
-            let (k,v) = map.iter().next().unwrap();
-            res.extend( [ k.to_string() + "=" + v ] );
-            res.extend( map.iter().skip(1).map( |(k,v)| String::from('&') + k + "=" + v ) );
+            let (k, v) = map.iter().next().unwrap();
+            res.extend([k.to_string() + "=" + v]);
+            res.extend(
+                map.iter()
+                    .skip(1)
+                    .map(|(k, v)| String::from('&') + k + "=" + v),
+            );
         }
         res
     }
 
-    /// Converts a mapping into JSON 
-    pub fn to_json<'a>( map : &Vec<(&'a str, &'a str)> ) -> String {
+    /// Converts a mapping into JSON
+    pub fn to_json<'a>(map: &Vec<(&'a str, &'a str)>) -> String {
         let mut res = String::new();
         res.push_str("{");
         if map.len() > 0 {
-            let (k,v) = map.iter().next().unwrap();
-            res.push_str( &("\n\t".to_string() + k + ": \'" + v + "\'")  );
-            res.extend( map.iter().skip(1).map( |(k,v)| String::from(",\n\t") + k + ": \'" + v + "\'" ) );
+            let (k, v) = map.iter().next().unwrap();
+            res.push_str(&("\n\t".to_string() + k + ": \'" + v + "\'"));
+            res.extend(
+                map.iter()
+                    .skip(1)
+                    .map(|(k, v)| String::from(",\n\t") + k + ": \'" + v + "\'"),
+            );
             res.push_str("\n");
         }
         res.push_str("}");
@@ -322,20 +330,92 @@ pub mod uri {
 
     #[test]
     fn test_from_uri() {
-        let hashmap = Vec::from_iter([("foo","bar"), ("baz","qux"), ("zap","zazzle")]);
-        assert_eq!(from_uri("foo=bar&baz=qux&zap=zazzle"), Some(hashmap) );
+        let hashmap = Vec::from_iter([("foo", "bar"), ("baz", "qux"), ("zap", "zazzle")]);
+        assert_eq!(from_uri("foo=bar&baz=qux&zap=zazzle"), Some(hashmap));
     }
 
     #[test]
     fn test_to_uri() {
-        let hashmap = Vec::from_iter([("foo","bar"), ("baz","qux"), ("zap","zazzle")]);
+        let hashmap = Vec::from_iter([("foo", "bar"), ("baz", "qux"), ("zap", "zazzle")]);
         assert_eq!(to_uri(&hashmap), "foo=bar&baz=qux&zap=zazzle")
     }
 
     #[test]
-    fn test_to_json(){
-        let hashmap = Vec::from_iter([("foo","bar"), ("baz","qux"), ("zap","zazzle")]);
-        assert_eq!(to_json(&hashmap), "{\n\tfoo: \'bar\',\n\tbaz: \'qux\',\n\tzap: \'zazzle\'\n}")
+    fn test_to_json() {
+        let hashmap = Vec::from_iter([("foo", "bar"), ("baz", "qux"), ("zap", "zazzle")]);
+        assert_eq!(
+            to_json(&hashmap),
+            "{\n\tfoo: \'bar\',\n\tbaz: \'qux\',\n\tzap: \'zazzle\'\n}"
+        )
+    }
+}
+
+pub mod to_uint {
+    use crypto_bigint::{CheckedAdd, CheckedMul, Encoding, Uint};
+
+    /// Generates Uint<LIMBS> from big endian bytes
+    pub fn bytes_into_uint<const LIMBS: usize>(bytes: impl AsRef<[u8]>, big_endian : bool, left_aligned : bool) -> Option<Uint<LIMBS>>
+    where
+        Uint<LIMBS>: Encoding,
+    {
+        (bytes.as_ref().len() <= Uint::<LIMBS>::BYTES).then(|| {
+            let bytes_len = bytes.as_ref().len();
+            let mut v: Vec<u8> = vec![0; Uint::<LIMBS>::BYTES];
+            if left_aligned {
+                v[0..bytes_len].copy_from_slice(bytes.as_ref());
+            } else {
+                v[Uint::<LIMBS>::BYTES-bytes_len..Uint::<LIMBS>::BYTES].copy_from_slice(bytes.as_ref());
+            }
+            if big_endian { 
+                Uint::<LIMBS>::from_be_slice(&v)
+            } else {
+                Uint::<LIMBS>::from_le_slice(&v) 
+            }
+        })
     }
 
+    /// Generates Uint<LIMBS> from a decimal string
+    /// look at https://en.cppreference.com/w/cpp/string/byte/atoi for c++ implementation
+    pub fn string_into_uint<const LIMBS: usize>(num: &str) -> Option<Uint<LIMBS>> {
+        let ten: Uint<LIMBS> = Uint::from_u32(10);
+
+        num.trim()
+            .strip_prefix('+')
+            .unwrap_or(num.trim())
+            .chars()
+            .skip_while(|v| v.eq(&'0'))
+            .fold(Some(Uint::ZERO), |acc, v| {
+                v.to_digit(10)
+                    .zip(acc.and_then(|v| v.checked_mul(&ten).into()))
+                    .and_then(|(digit, v): (u32, Uint<LIMBS>)| {
+                        v.checked_add(&Uint::from_u32(digit)).into()
+                    })
+            })
+    }
+
+    #[test]
+    fn test_bytes_into_uint() {
+        use crypto_bigint::U192;
+
+        let hash = [0x20, 0x30, 0x40];
+        const LIMBS: usize = U192::LIMBS; 
+
+        assert_eq!( format!("{:?}",bytes_into_uint::<LIMBS>(hash, true, true).unwrap() ),"Uint(0x203040000000000000000000000000000000000000000000)"  );
+        assert_eq!( format!("{:?}",bytes_into_uint::<LIMBS>(hash, true, false).unwrap() ),"Uint(0x000000000000000000000000000000000000000000203040)"  );
+        assert_eq!( format!("{:?}",bytes_into_uint::<LIMBS>(hash, false, true).unwrap() ),"Uint(0x000000000000000000000000000000000000000000403020)"  );
+        assert_eq!( format!("{:?}",bytes_into_uint::<LIMBS>(hash, false, false).unwrap() ),"Uint(0x403020000000000000000000000000000000000000000000)"  );
+    }
+
+
+    #[test]
+    fn test_string_into_uint() {
+        use crypto_bigint::U1024;
+
+        const LIMBS: usize = U1024::LIMBS;
+
+        assert_eq!(string_into_uint("+00001230"), Some(U1024::from_u32(1230)));
+        assert_eq!(string_into_uint("00001230"), Some(U1024::from_u32(1230)));
+        assert_eq!(string_into_uint("1230"), Some(U1024::from_u32(1230)));
+        assert_eq!(string_into_uint::<LIMBS>("++001230"), None);
+    }
 }

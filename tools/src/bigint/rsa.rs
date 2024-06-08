@@ -114,16 +114,11 @@ impl RSA {
         })
     }
 
-    /// Generates Uint<LIMBS> from big endian bytes
-    pub fn into_uint<const LIMBS : usize>(bytes : impl AsRef<[u8]> ) -> Option<Uint<LIMBS>> 
+    pub fn into_uint<const LIMBS: usize>(m : impl AsRef<[u8]> ) -> Option<Uint<LIMBS>> 
         where Uint<LIMBS> : Encoding
     {
-        (bytes.as_ref().len() <= Uint::<LIMBS>::BYTES ).then( || {
-                let bytes_len = bytes.as_ref().len();
-                let mut v: Vec<u8>  = vec![0; Uint::<LIMBS>::BYTES];
-                v[0..bytes_len].copy_from_slice(bytes.as_ref());
-                Uint::<LIMBS>::from_le_slice(&v)
-            }
-        )
+        use crate::encode::to_uint::bytes_into_uint;
+
+        bytes_into_uint(m, true, false)
     }
 }

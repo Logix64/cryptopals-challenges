@@ -142,6 +142,6 @@ fn main() {
         i2.get_modulus().modulus() 
     );
 
-    println!("the encrypted message is : \n {}", to_ascii(&decrypted.to_le_bytes(), true)); 
+    println!("the encrypted message is : \n {}", to_ascii(&decrypted.to_be_bytes(), true)); 
     assert_eq!(message, decrypted);
 }

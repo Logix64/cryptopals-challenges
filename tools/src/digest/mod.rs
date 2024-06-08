@@ -172,6 +172,20 @@ macro_rules! hash {
     };
 }
 
+#[macro_export]
+macro_rules! hash_by_algo {
+    ($algo:ty,$($x:expr),*) => {
+        {
+            let mut temp = $crate::digest::Hasher::<$algo>::new();
+            $(
+                temp.update($x);
+            )*
+            temp.finalize()
+        }
+    };
+}
+
+
 #[test]
 fn test_hmac_sha1() {
     // test vector for sha-1 from https://datatracker.ietf.org/doc/html/rfc2202 
