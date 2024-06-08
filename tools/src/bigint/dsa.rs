@@ -4,7 +4,7 @@ use crypto_bigint::{
         constant_mod::{Residue, ResidueParams},
         runtime_mod::{DynResidue, DynResidueParams},
     },
-    subtle::ConstantTimeEq,
+    subtle::{ConstantTimeEq, CtOption},
     CtChoice, Encoding, Random, Uint, Zero,
 };
 use rand::thread_rng;
@@ -27,8 +27,13 @@ where
 
 #[macro_export]
 macro_rules! generate_dsa_params {
-    ($name:ident, $uint_p:ty, $uint_q:ty, $p:ty, $q:ty, $g:expr, $hash:ty) => {
+    ($name:ident, $const_name:ident, $uint_p:ty, $uint_q:ty, $p:ty, $q:ty, $g:expr, $hash:ty) => {
         struct $name {}
+
+        paste::paste! {
+            const [<$const_name _P_LIMBS>] : usize = <$uint_p>::LIMBS;
+            const [<$const_name _Q_LIMBS>] : usize = <$uint_q>::LIMBS;
+        }
 
         impl $crate::bigint::dsa::DSAParameters<{ <$uint_p>::LIMBS }, { <$uint_q>::LIMBS }>
             for $name
@@ -38,16 +43,16 @@ macro_rules! generate_dsa_params {
             type Q = $q;
             const G: crypto_bigint::modular::constant_mod::Residue<Self::P, { <$uint_p>::LIMBS }> =
                 crypto_bigint::modular::constant_mod::Residue::new(
-                    &Uint::<{ <$uint_p>::LIMBS }>::from_be_hex($g),
+                    &crypto_bigint::Uint::<{ <$uint_p>::LIMBS }>::from_be_hex($g),
                 );
         }
     };
-    ($name:ident, $uint_p:ty, $uint_q:ty, $g:expr, $hash:ty, $p_value:expr, $q_value:expr) => {
+    ($name:ident, $const_name:ident, $uint_p:ty, $uint_q:ty, $g:expr, $hash:ty, $p_value:expr, $q_value:expr) => {
         paste::paste! {
 
             crypto_bigint::impl_modulus!([<$name P>], $uint_p, $p_value);
             crypto_bigint::impl_modulus!([<$name Q>], $uint_q, $q_value);
-            generate_dsa_params!($name, $uint_p, $uint_q, [<$name P>],[<$name Q>], $g, $hash);
+            generate_dsa_params!($name, $const_name, $uint_p, $uint_q, [<$name P>],[<$name Q>], $g, $hash);
         }
     };
 }
@@ -72,14 +77,19 @@ where
     Uint<Q_LIMBS>: Encoding,
     PARAMETERS::HashFunction: HashAlgorithm,
 {
-    pub fn sign(&self, m: impl AsRef<[u8]>, little_endian : bool) -> (Uint<Q_LIMBS>, Uint<Q_LIMBS>) {
+    pub fn sign(&self, m: impl AsRef<[u8]>, little_endian: bool) -> (Uint<Q_LIMBS>, Uint<Q_LIMBS>) {
         loop {
             let k = Residue::<PARAMETERS::Q, Q_LIMBS>::random(&mut thread_rng());
             let (k_inv, choice) = k.invert();
             let r = PARAMETERS::modp_to_modq(&PARAMETERS::G.pow(&k.retrieve()));
 
             let h_m = Residue::<PARAMETERS::Q, Q_LIMBS>::new(
-                &bytes_into_uint::<Q_LIMBS>(hash_by_algo!(PARAMETERS::HashFunction, &m),little_endian, false).unwrap(),
+                &bytes_into_uint::<Q_LIMBS>(
+                    hash_by_algo!(PARAMETERS::HashFunction, &m),
+                    little_endian,
+                    false,
+                )
+                .unwrap(),
             );
 
             let s = k_inv.mul(&(h_m.add(&Residue::new(&self.private_key).mul(&r))));
@@ -127,7 +137,7 @@ impl DSA {
         r_uint: &Uint<Q_LIMBS>,
         s_uint: &Uint<Q_LIMBS>,
         public_key: Uint<P_LIMBS>,
-        little_endian : bool
+        little_endian: bool,
     ) -> bool
     where
         Uint<P_LIMBS>: Encoding,
@@ -139,8 +149,14 @@ impl DSA {
 
         let (w, choice) = s.invert();
 
-        let h_m =
-            Residue::new(&bytes_into_uint(hash_by_algo!(PARAMETERS::HashFunction, &m), little_endian, false).unwrap());
+        let h_m = Residue::new(
+            &bytes_into_uint(
+                hash_by_algo!(PARAMETERS::HashFunction, &m),
+                little_endian,
+                false,
+            )
+            .unwrap(),
+        );
 
         let u1 = w.mul(&h_m).retrieve();
         let u2 = r.mul(&w).retrieve();
@@ -161,25 +177,46 @@ impl DSA {
         nonce: &Uint<P_LIMBS>,
         s_uint: &Uint<Q_LIMBS>,
         r_inv: &Residue<PARAMETERS::Q, Q_LIMBS>,
-        hash: impl AsRef<[u8]>,
+        m: &Uint<Q_LIMBS>,
     ) -> Uint<Q_LIMBS>
     where
         Uint<P_LIMBS>: Encoding,
         Uint<Q_LIMBS>: Encoding,
     {
-        let h_m = Residue::new(&Self::into_uint(hash).unwrap());
+        let h_m = Residue::new(m);
         let s: Residue<PARAMETERS::Q, Q_LIMBS> = Residue::new(&s_uint);
         let k = PARAMETERS::modp_to_modq(&Residue::new(&nonce));
 
         ((s * k - h_m) * r_inv).retrieve()
     }
 
-    pub fn into_uint<const LIMBS: usize>(m : impl AsRef<[u8]> ) -> Option<Uint<LIMBS>> 
-        where Uint<LIMBS> : Encoding
+    pub fn recover_nonce<
+        const P_LIMBS: usize,
+        const Q_LIMBS: usize,
+        PARAMETERS: DSAParameters<P_LIMBS, Q_LIMBS>,
+    >(
+        m1_uint: &Uint<Q_LIMBS>,
+        m2_uint: &Uint<Q_LIMBS>,
+        s1_uint: &Uint<Q_LIMBS>,
+        s2_uint: &Uint<Q_LIMBS>,
+    ) -> CtOption<Uint<Q_LIMBS>>
+    where
+        Uint<Q_LIMBS>: Encoding,
+        Uint<P_LIMBS>: Encoding,
+    {
+        let m1: Residue<PARAMETERS::Q, Q_LIMBS> = Residue::new(&m1_uint);
+        let m2 = Residue::new(&m2_uint);
+        let (diff, choice) = (Residue::new(&s1_uint) - Residue::new(&s2_uint)).invert();
+
+        CtOption::new(diff, choice.into()).map(|v| (m1 - m2).mul(&v).retrieve())
+    }
+
+    pub fn into_uint<const LIMBS: usize>(m: impl AsRef<[u8]>) -> Option<Uint<LIMBS>>
+    where
+        Uint<LIMBS>: Encoding,
     {
         use crate::encode::to_uint::bytes_into_uint;
 
         bytes_into_uint(m, true, false)
     }
-
 }
