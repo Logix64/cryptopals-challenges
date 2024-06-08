@@ -1,4 +1,4 @@
-use crate::{digest::HashAlgorithm, encode::to_uint::bytes_into_uint, hash_by_algo};
+use crate::{digest::HashAlgorithm,hash_by_algo};
 use crypto_bigint::{
     modular::{
         constant_mod::{Residue, ResidueParams},
@@ -77,27 +77,25 @@ where
     Uint<Q_LIMBS>: Encoding,
     PARAMETERS::HashFunction: HashAlgorithm,
 {
-    pub fn sign(&self, m: impl AsRef<[u8]>, little_endian: bool) -> (Uint<Q_LIMBS>, Uint<Q_LIMBS>) {
+    pub fn sign(&self, m: impl AsRef<[u8]>, null_check: bool ) -> (Uint<Q_LIMBS>, Uint<Q_LIMBS>) {
         loop {
             let k = Residue::<PARAMETERS::Q, Q_LIMBS>::random(&mut thread_rng());
             let (k_inv, choice) = k.invert();
             let r = PARAMETERS::modp_to_modq(&PARAMETERS::G.pow(&k.retrieve()));
 
             let h_m = Residue::<PARAMETERS::Q, Q_LIMBS>::new(
-                &bytes_into_uint::<Q_LIMBS>(
+                &DSA::into_uint(
                     hash_by_algo!(PARAMETERS::HashFunction, &m),
-                    little_endian,
-                    false,
                 )
                 .unwrap(),
             );
 
             let s = k_inv.mul(&(h_m.add(&Residue::new(&self.private_key).mul(&r))));
 
-            if r.is_zero().into() || s.is_zero().into() || !<CtChoice as Into<bool>>::into(choice) {
-                continue;
+            if  !(r.is_zero().into() || s.is_zero().into() || !<CtChoice as Into<bool>>::into(choice)) || !null_check {
+                return (r.retrieve(), s.retrieve())
             } else {
-                return (r.retrieve(), s.retrieve());
+                continue;
             }
         }
     }
@@ -137,7 +135,7 @@ impl DSA {
         r_uint: &Uint<Q_LIMBS>,
         s_uint: &Uint<Q_LIMBS>,
         public_key: Uint<P_LIMBS>,
-        little_endian: bool,
+        null_check : bool
     ) -> bool
     where
         Uint<P_LIMBS>: Encoding,
@@ -150,10 +148,8 @@ impl DSA {
         let (w, choice) = s.invert();
 
         let h_m = Residue::new(
-            &bytes_into_uint(
+            &DSA::into_uint(
                 hash_by_algo!(PARAMETERS::HashFunction, &m),
-                little_endian,
-                false,
             )
             .unwrap(),
         );
@@ -165,8 +161,8 @@ impl DSA {
 
         v.ct_eq(&r_uint).into()
             && choice.into()
-            && r.is_zero().unwrap_u8() == 0x00
-            && s.is_zero().unwrap_u8() == 0x00
+            && (( r.is_zero().unwrap_u8() == 0x00
+            && s.is_zero().unwrap_u8() == 0x00) || !null_check)
     }
 
     pub fn recover_private_key_from_nonce<
