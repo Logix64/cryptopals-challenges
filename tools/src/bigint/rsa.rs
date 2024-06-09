@@ -1,11 +1,13 @@
 use std::marker::PhantomData;
 
 use crypto_bigint::{
-    modular::runtime_mod::{DynResidue, DynResidueParams}, subtle::CtOption, CheckedSub, Encoding, Uint
+    modular::runtime_mod::{DynResidue, DynResidueParams},
+    subtle::CtOption,
+    CheckedSub, Encoding, Uint,
 };
 use crypto_primes::generate_prime;
 
-/// Trait for constant public exponents 
+/// Trait for constant public exponents
 pub trait PublicExponent<const LIMBS: usize> {
     const EXPONENT: Uint<LIMBS>;
 }
@@ -26,7 +28,7 @@ impl<const LIMBS: usize> PublicExponent<LIMBS> for NistExponent<LIMBS> {
 
 /// Trait for Public/Private keys for encryption
 pub trait Key<const LIMBS: usize> {
-    fn encrypt(&self, text: &Uint<LIMBS>) -> Uint<LIMBS>;
+    fn encrypt<const XLIMBS: usize>(&self, text: &Uint<XLIMBS>) -> Uint<LIMBS>;
     fn get_modulus(&self) -> DynResidueParams<LIMBS>;
 }
 
@@ -39,10 +41,8 @@ pub struct PublicKey<const LIMBS: usize, EXPONENT: PublicExponent<LIMBS>> {
 impl<const LIMBS: usize, EXPONENT: PublicExponent<LIMBS>> Key<LIMBS>
     for PublicKey<LIMBS, EXPONENT>
 {
-    fn encrypt(&self, text: &Uint<LIMBS>) -> Uint<LIMBS> {
-        DynResidue::new(text, self.modulus)
-            .pow(&EXPONENT::EXPONENT)
-            .retrieve()
+    fn encrypt<const XLIMBS: usize>(&self, text: &Uint<XLIMBS>) -> Uint<LIMBS> {
+        modexp_dyn_base(&text, &EXPONENT::EXPONENT, self.modulus)
     }
 
     fn get_modulus(&self) -> DynResidueParams<LIMBS> {
@@ -57,14 +57,33 @@ pub struct PrivateKey<const LIMBS: usize> {
 }
 
 impl<const LIMBS: usize> Key<LIMBS> for PrivateKey<LIMBS> {
-    fn encrypt(&self, text: &Uint<LIMBS>) -> Uint<LIMBS> {
-        DynResidue::new(text, self.modulus)
-            .pow(&self.exponent)
-            .retrieve()
+    fn encrypt<const XLIMBS: usize>(&self, text: &Uint<XLIMBS>) -> Uint<LIMBS> {
+        modexp_dyn_base(text, &self.exponent, self.modulus)
     }
 
     fn get_modulus(&self) -> DynResidueParams<LIMBS> {
         self.modulus
+    }
+}
+
+fn modexp_dyn_base<
+    const BASE_LIMBS: usize,
+    const EXPONENT_LIMBS: usize,
+    const MODULUS_LIMBS: usize,
+>(
+    base: &Uint<BASE_LIMBS>,
+    exponent: &Uint<EXPONENT_LIMBS>,
+    modulus: DynResidueParams<MODULUS_LIMBS>,
+) -> Uint<MODULUS_LIMBS> {
+    if BASE_LIMBS <= MODULUS_LIMBS {
+        DynResidue::new(&base.resize(), modulus)
+            .pow(&exponent)
+            .retrieve()
+    } else {
+        DynResidue::new(base, DynResidueParams::new(&modulus.modulus().resize()))
+            .pow(&exponent)
+            .retrieve()
+            .resize()
     }
 }
 
@@ -82,8 +101,7 @@ impl RSA {
             let (n, _) = p.mul_wide(&q);
             let modulus = DynResidueParams::new(&n);
 
-
-            let result  = Self::totient(&p, &q).map( |totient| EXPONENT::EXPONENT.inv_mod(&totient) );
+            let result = Self::totient(&p, &q).map(|totient| EXPONENT::EXPONENT.inv_mod(&totient));
 
             if result.is_some().into() {
                 let (exponent, choice) = result.unwrap();
@@ -100,7 +118,6 @@ impl RSA {
                     );
                 }
             }
-           
         }
     }
 
@@ -114,8 +131,9 @@ impl RSA {
         })
     }
 
-    pub fn into_uint<const LIMBS: usize>(m : impl AsRef<[u8]> ) -> Option<Uint<LIMBS>> 
-        where Uint<LIMBS> : Encoding
+    pub fn into_uint<const LIMBS: usize>(m: impl AsRef<[u8]>) -> Option<Uint<LIMBS>>
+    where
+        Uint<LIMBS>: Encoding,
     {
         use crate::encode::to_uint::bytes_into_uint;
 

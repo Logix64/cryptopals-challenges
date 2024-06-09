@@ -124,7 +124,7 @@ fn main() {
     let verificator = Verificator::new(public_key);
 
     // sign message
-    let c = private_key.encrypt(&pkcs15format(sha1) );
+    let c = private_key.encrypt::<LIMBS>(&pkcs15format(sha1) );
     assert!(verificator.verify::<Sha1Core>(&c) );
 
     let mut set_root = SIZE::ZERO;
